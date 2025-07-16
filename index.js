@@ -1,3 +1,6 @@
+import Point from 'ol/geom/Point';
+import CircleStyle from 'ol/style/Circle';
+import Fill from 'ol/style/Fill';
 import Map from './node_modules/ol/Map';
 import View from './node_modules/ol/View';
 import TileLayer from './node_modules/ol/layer/Tile';
@@ -56,86 +59,120 @@ const vectorLayer = new VectorLayer({ source: vectorSource });
 map.addLayer(vectorLayer)
 
 // Track selected feature
+// Global state
 let selectedFeature = null;
+let vertexLayer = null;
+let isCreatingTrail = false;
 
+const contextMenu = document.getElementById('context-menu');
+
+// CLICK TO SELECT/DESLECT
 map.on('singleclick', function (evt) {
-  let featureClicked = false;
+  const clickedFeature = map.forEachFeatureAtPixel(evt.pixel, f => f);
 
-  map.forEachFeatureAtPixel(evt.pixel, function (feature) {
-    // Clicked the line
-    if (feature.getId() === 'mesa-line') {
-      feature.setStyle(selectedStyle);
-      featureClicked = true;
-      const contextMenu = document.getElementById('context-menu');
+  if (clickedFeature && clickedFeature.getId() === 'mesa-line') {
+    if (selectedFeature && selectedFeature !== clickedFeature) {
+      selectedFeature.setStyle(defaultStyle);
+    }
 
-      // Show custom menu on right click
-      map.getTargetElement().addEventListener('contextmenu', function (evt) {
-        evt.preventDefault();
+    clickedFeature.setStyle(selectedStyle);
+    selectedFeature = clickedFeature;
+  } else {
+    // Clicked empty space — deselect
+    if (selectedFeature) {
+      selectedFeature.setStyle(defaultStyle);
+      selectedFeature = null;
+    }
 
-        // Get map coordinate from mouse event
-        const pixel = map.getEventPixel(evt);
-        const feature = map.forEachFeatureAtPixel(pixel, function (feature) {
-          return feature;
+    // Also hide context menu and trail points
+    contextMenu.style.display = 'none';
+    if (vertexLayer) {
+      map.removeLayer(vertexLayer);
+      vertexLayer = null;
+    }
+    isCreatingTrail = false;
+  }
+});
+
+
+// CONTEXT MENU (right click)
+map.getTargetElement().addEventListener('contextmenu', function (evt) {
+  evt.preventDefault();
+
+  if (selectedFeature) {
+    contextMenu.style.left = `${evt.clientX}px`;
+    contextMenu.style.top = `${evt.clientY}px`;
+    contextMenu.style.display = 'block';
+  } else {
+    contextMenu.style.display = 'none';
+  }
+});
+
+// HIDE CONTEXT MENU ON CLICK OUTSIDE
+document.addEventListener('click', function (evt) {
+  if (!contextMenu.contains(evt.target)) {
+    contextMenu.style.display = 'none';
+  }
+});
+
+// CONTEXT MENU ACTIONS
+contextMenu.addEventListener('click', function (evt) {
+  const action = evt.target.getAttribute('data-action');
+  if (!action || !selectedFeature) return;
+
+  switch (action) {
+    case 'Create trail': {
+      if (selectedFeature.getGeometry().getType() === 'LineString') {
+        isCreatingTrail = true;
+
+        const coords = selectedFeature.getGeometry().getCoordinates();
+        const points = coords.map(coord => new Feature(new Point(coord)));
+
+        const pointStyle = new Style({
+          image: new CircleStyle({
+            radius: 6,
+            fill: new Fill({ color: 'red' }),
+            stroke: new Stroke({ color: 'white', width: 2 }),
+          }),
         });
 
-        // Only show context menu if a feature was clicked
-        if (feature) {
-          // Optionally store the feature if you want to act on it
-          selectedFeature = feature;
+        points.forEach(pt => pt.setStyle(pointStyle));
 
-          // Position the menu
-          contextMenu.style.left = evt.clientX + 'px';
-          contextMenu.style.top = evt.clientY + 'px';
-          contextMenu.style.display = 'block';
-        } else {
-          // Hide the menu if no feature
-          contextMenu.style.display = 'none';
-        }
-      });
+        if (vertexLayer) map.removeLayer(vertexLayer);
 
-      // Hide menu on map click or elsewhere
-      map.on('click', () => {
-        contextMenu.style.display = 'none';
-      });
+        vertexLayer = new VectorLayer({
+          source: new VectorSource({ features: points }),
+        });
 
-      document.addEventListener('click', (evt) => {
-        // Hide menu if clicking outside of it
-        if (!contextMenu.contains(evt.target)) {
-          contextMenu.style.display = 'none';
-        }
-      });
-
-      // Handle menu item clicks
-      contextMenu.addEventListener('click', (evt) => {
-        const action = evt.target.getAttribute('data-action');
-        if (!action) return;
-
-        switch (action) {
-          case 'Create trail':
-            map.getView().setZoom(map.getView().getZoom() + 1);
-            break;
-          case 'Replace trail':
-            map.getView().setZoom(map.getView().getZoom() - 1);
-            break;
-          case 'Deselect':
-              selectedFeature.setStyle(defaultStyle);
-              featureClicked = false;
-            break;
-        }
-
-        contextMenu.style.display = 'none';
-      });
-      if (selectedFeature && selectedFeature !== feature) {
-        selectedFeature.setStyle(defaultStyle);
+        map.addLayer(vertexLayer);
       }
-
-      selectedFeature = feature;
+      break;
     }
-  });
 
-  // Clicked elsewhere on map, reset previous feature
-  if (!featureClicked && selectedFeature) {
-    selectedFeature.setStyle(defaultStyle);
-    selectedFeature = null;
+    case 'Replace trail':
+      map.getView().setZoom(map.getView().getZoom() - 1);
+      break;
+
+    case 'Deselect':
+      selectedFeature.setStyle(defaultStyle);
+      selectedFeature = null;
+      if (vertexLayer) {
+        map.removeLayer(vertexLayer);
+        vertexLayer = null;
+      }
+      isCreatingTrail = false;
+      break;
   }
+  // if (selectedFeature && selectedFeature !== feature) {
+  //   selectedFeature.setStyle(defaultStyle);
+  // }
+  
+  // if (!featureClicked && selectedFeature) {
+  //   selectedFeature.setStyle(defaultStyle);
+  //   selectedFeature = null;
+  // }
+  
+  // selectedFeature = feature;
+
+  contextMenu.style.display = 'none';
 });
