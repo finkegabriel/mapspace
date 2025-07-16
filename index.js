@@ -58,6 +58,10 @@ map.addLayer(vectorLayer)
 // Track selected feature
 let selectedFeature = null;
 
+map.on('mouseup', (evt) => {
+
+});
+
 map.on('singleclick', function (evt) {
   let featureClicked = false;
 
@@ -66,7 +70,65 @@ map.on('singleclick', function (evt) {
     if (feature.getId() === 'mesa-line') {
       feature.setStyle(selectedStyle);
       featureClicked = true;
+      const contextMenu = document.getElementById('context-menu');
 
+      // Show custom menu on right click
+      map.getTargetElement().addEventListener('contextmenu', function (evt) {
+        evt.preventDefault();
+
+        // Get map coordinate from mouse event
+        const pixel = map.getEventPixel(evt);
+        const feature = map.forEachFeatureAtPixel(pixel, function (feature) {
+          return feature;
+        });
+
+        // Only show context menu if a feature was clicked
+        if (feature) {
+          // Optionally store the feature if you want to act on it
+          selectedFeature = feature;
+
+          // Position the menu
+          contextMenu.style.left = evt.clientX + 'px';
+          contextMenu.style.top = evt.clientY + 'px';
+          contextMenu.style.display = 'block';
+        } else {
+          // Hide the menu if no feature
+          contextMenu.style.display = 'none';
+        }
+      });
+
+      // Hide menu on map click or elsewhere
+      map.on('click', () => {
+        contextMenu.style.display = 'none';
+      });
+
+      document.addEventListener('click', (evt) => {
+        // Hide menu if clicking outside of it
+        if (!contextMenu.contains(evt.target)) {
+          contextMenu.style.display = 'none';
+        }
+      });
+
+      // Handle menu item clicks
+      contextMenu.addEventListener('click', (evt) => {
+        const action = evt.target.getAttribute('data-action');
+        if (!action) return;
+
+        switch (action) {
+          case 'Create trail':
+            map.getView().setZoom(map.getView().getZoom() + 1);
+            break;
+          case 'Replace trail':
+            map.getView().setZoom(map.getView().getZoom() - 1);
+            break;
+          case 'Deselect':
+            map.getView().setCenter(fromLonLat([-111.8315, 33.4152]));
+            map.getView().setZoom(13);
+            break;
+        }
+
+        contextMenu.style.display = 'none';
+      });
       if (selectedFeature && selectedFeature !== feature) {
         selectedFeature.setStyle(defaultStyle);
       }
@@ -80,48 +142,4 @@ map.on('singleclick', function (evt) {
     selectedFeature.setStyle(defaultStyle);
     selectedFeature = null;
   }
-});
-
-const contextMenu = document.getElementById('context-menu');
-
-// Show custom menu on right click
-map.getTargetElement().addEventListener('contextmenu', function (evt) {
-  evt.preventDefault();
-
-  // Position the menu at the mouse position
-  contextMenu.style.left = evt.clientX + 'px';
-  contextMenu.style.top = evt.clientY + 'px';
-  contextMenu.style.display = 'block';
-});
-
-// Hide menu on map click or elsewhere
-map.on('click', () => {
-  contextMenu.style.display = 'none';
-});
-document.addEventListener('click', (evt) => {
-  // Hide menu if clicking outside of it
-  if (!contextMenu.contains(evt.target)) {
-    contextMenu.style.display = 'none';
-  }
-});
-
-// Handle menu item clicks
-contextMenu.addEventListener('click', (evt) => {
-  const action = evt.target.getAttribute('data-action');
-  if (!action) return;
-
-  switch(action) {
-    case 'Create trail':
-      map.getView().setZoom(map.getView().getZoom() + 1);
-      break;
-    case 'Replace trail':
-      map.getView().setZoom(map.getView().getZoom() - 1);
-      break;
-    case 'Deselect':
-      map.getView().setCenter(fromLonLat([-111.8315, 33.4152]));
-      map.getView().setZoom(13);
-      break;
-  }
-
-  contextMenu.style.display = 'none';
 });
