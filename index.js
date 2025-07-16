@@ -63,6 +63,7 @@ map.addLayer(vectorLayer)
 let selectedFeature = null;
 let vertexLayer = null;
 let isCreatingTrail = false;
+let originalCoords = null; // stores original geometry before editing
 
 const contextMenu = document.getElementById('context-menu');
 
@@ -78,19 +79,46 @@ map.on('singleclick', function (evt) {
     clickedFeature.setStyle(selectedStyle);
     selectedFeature = clickedFeature;
   } else {
-    // Clicked empty space — deselect
-    if (selectedFeature) {
+    // Clicked empty space — only deselect if not adding trail
+    if (!isCreatingTrail && selectedFeature) {
       selectedFeature.setStyle(defaultStyle);
       selectedFeature = null;
-    }
 
-    // Also hide context menu and trail points
-    contextMenu.style.display = 'none';
-    if (vertexLayer) {
-      map.removeLayer(vertexLayer);
-      vertexLayer = null;
+      contextMenu.style.display = 'none';
+      if (vertexLayer) {
+        map.removeLayer(vertexLayer);
+        vertexLayer = null;
+      }
     }
-    isCreatingTrail = false;
+  }
+
+});
+
+map.on('click', function (evt) {
+  if (!isCreatingTrail || !selectedFeature) return;
+
+  const featureAtPixel = map.forEachFeatureAtPixel(evt.pixel, f => f);
+  if (featureAtPixel && featureAtPixel !== selectedFeature) return;
+
+  const geometry = selectedFeature.getGeometry();
+  if (geometry.getType() !== 'LineString') return;
+
+  const coords = geometry.getCoordinates();
+  coords.push(evt.coordinate); // Add the clicked point
+  geometry.setCoordinates(coords); // Update the line
+
+  // Add a red vertex dot for the new point
+  const newVertex = new Feature(new Point(evt.coordinate));
+  newVertex.setStyle(new Style({
+    image: new CircleStyle({
+      radius: 6,
+      fill: new Fill({ color: 'red' }),
+      stroke: new Stroke({ color: 'white', width: 2 }),
+    }),
+  }));
+
+  if (vertexLayer && vertexLayer.getSource()) {
+    vertexLayer.getSource().addFeature(newVertex);
   }
 });
 
@@ -125,7 +153,8 @@ contextMenu.addEventListener('click', function (evt) {
       if (selectedFeature.getGeometry().getType() === 'LineString') {
         isCreatingTrail = true;
 
-        const coords = selectedFeature.getGeometry().getCoordinates();
+        originalCoords = [...selectedFeature.getGeometry().getCoordinates()]; // save a copy
+        const coords = originalCoords.map(coord => [...coord]); // use a deep copy
         const points = coords.map(coord => new Feature(new Point(coord)));
 
         const pointStyle = new Style({
@@ -150,29 +179,36 @@ contextMenu.addEventListener('click', function (evt) {
     }
 
     case 'Replace trail':
-      map.getView().setZoom(map.getView().getZoom() - 1);
+      if (isCreatingTrail) {
+        originalCoords = null; // discard old version, keep new one
+        isCreatingTrail = false;
+
+        if (vertexLayer) {
+          map.removeLayer(vertexLayer);
+          vertexLayer = null;
+        }
+      }
+
+      selectedFeature.setStyle(selectedStyle);
       break;
 
     case 'Deselect':
+      if (isCreatingTrail && originalCoords) {
+        selectedFeature.getGeometry().setCoordinates(originalCoords); // restore original line
+        originalCoords = null;
+      }
+
       selectedFeature.setStyle(defaultStyle);
       selectedFeature = null;
+
       if (vertexLayer) {
         map.removeLayer(vertexLayer);
         vertexLayer = null;
       }
+
       isCreatingTrail = false;
+
       break;
   }
-  // if (selectedFeature && selectedFeature !== feature) {
-  //   selectedFeature.setStyle(defaultStyle);
-  // }
-  
-  // if (!featureClicked && selectedFeature) {
-  //   selectedFeature.setStyle(defaultStyle);
-  //   selectedFeature = null;
-  // }
-  
-  // selectedFeature = feature;
-
   contextMenu.style.display = 'none';
 });
