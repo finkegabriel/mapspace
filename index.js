@@ -58,10 +58,6 @@ map.addLayer(vectorLayer)
 // Track selected feature
 let selectedFeature = null;
 
-map.on('mouseup', (evt) => {
-
-});
-
 map.on('singleclick', function (evt) {
   let featureClicked = false;
 
@@ -122,8 +118,8 @@ map.on('singleclick', function (evt) {
             map.getView().setZoom(map.getView().getZoom() - 1);
             break;
           case 'Deselect':
-            map.getView().setCenter(fromLonLat([-111.8315, 33.4152]));
-            map.getView().setZoom(13);
+              selectedFeature.setStyle(defaultStyle);
+              featureClicked = false;
             break;
         }
 
