@@ -42,10 +42,11 @@ const map = new Map({
     zoom: 12
   })
 });
+
 const coords = [
-  fromLonLat([-111.85, 33.41]), // Point 1 (Mesa)
-  fromLonLat([-111.80, 33.42]), // Point 2
-  fromLonLat([-111.75, 33.44])  // Point 3
+  // fromLonLat([-111.85, 33.41]), // Point 1 (Mesa)
+  // fromLonLat([-111.80, 33.42]), // Point 2
+  // fromLonLat([-111.75, 33.44])  // Point 3
 ];
 
 const lineFeature = new Feature(new LineString(coords));
@@ -64,14 +65,17 @@ let selectedFeature = null;
 let vertexLayer = null;
 let isCreatingTrail = false;
 let originalCoords = null; // stores original geometry before editing
+let rightClick = false;
+const trailFeatures = []; // Global array to store trail line features
 
 const contextMenu = document.getElementById('context-menu');
+const contextMenuTrail = document.getElementById('context-menu-trail');
 
 // CLICK TO SELECT/DESLECT
 map.on('singleclick', function (evt) {
   const clickedFeature = map.forEachFeatureAtPixel(evt.pixel, f => f);
 
-  if (clickedFeature && clickedFeature.getId() === 'mesa-line') {
+  if (clickedFeature && clickedFeature.getGeometry().getType() === 'LineString') {
     if (selectedFeature && selectedFeature !== clickedFeature) {
       selectedFeature.setStyle(defaultStyle);
     }
@@ -133,6 +137,9 @@ map.getTargetElement().addEventListener('contextmenu', function (evt) {
     contextMenu.style.display = 'block';
   } else {
     contextMenu.style.display = 'none';
+    contextMenuTrail.style.left = `${evt.clientX}px`;
+    contextMenuTrail.style.top = `${evt.clientY}px`;
+    contextMenuTrail.style.display = 'block';
   }
 });
 
@@ -141,6 +148,41 @@ document.addEventListener('click', function (evt) {
   if (!contextMenu.contains(evt.target)) {
     contextMenu.style.display = 'none';
   }
+});
+
+document.addEventListener('click', function (evt) {
+  if (!contextMenuTrail.contains(evt.target)) {
+    contextMenuTrail.style.display = 'none';
+  }
+});
+
+contextMenuTrail.addEventListener('click', function (evt) {
+  const action = evt.target.getAttribute('data-action');
+  if (action !== 'trail-mode') return;
+
+  isCreatingTrail = true;
+
+  // Create a new LineString feature with empty coordinates
+  const newFeature = new Feature(new LineString([]));
+  newFeature.setId(`trail-${Date.now()}`);
+  newFeature.setStyle(selectedStyle);
+
+  // Add it to the vector source
+  vectorSource.addFeature(newFeature);
+
+  // Save it to our array of trail features
+  trailFeatures.push(newFeature);
+
+  // Set as currently selected
+  selectedFeature = newFeature;
+
+  // Create (or reset) vertex layer
+  if (vertexLayer) map.removeLayer(vertexLayer);
+  vertexLayer = new VectorLayer({ source: new VectorSource() });
+  map.addLayer(vertexLayer);
+
+  // Hide the context menu
+  contextMenuTrail.style.display = 'none';
 });
 
 // CONTEXT MENU ACTIONS
@@ -209,6 +251,33 @@ contextMenu.addEventListener('click', function (evt) {
       isCreatingTrail = false;
 
       break;
+    case 'trail-mode': {
+      isCreatingTrail = true;
+
+      originalCoords = [...selectedFeature.getGeometry().getCoordinates()]; // save a copy
+      const coords = originalCoords.map(coord => [...coord]); // use a deep copy
+      const points = coords.map(coord => new Feature(new Point(coord)));
+
+      const pointStyle = new Style({
+        image: new CircleStyle({
+          radius: 6,
+          fill: new Fill({ color: 'red' }),
+          stroke: new Stroke({ color: 'white', width: 2 }),
+        }),
+      });
+
+      points.forEach(pt => pt.setStyle(pointStyle));
+
+      if (vertexLayer) map.removeLayer(vertexLayer);
+
+      vertexLayer = new VectorLayer({
+        source: new VectorSource({ features: points }),
+      });
+
+      map.addLayer(vertexLayer);
+      break;
+    }
   }
+  contextMenuTrail.style.display = "none";
   contextMenu.style.display = 'none';
 });

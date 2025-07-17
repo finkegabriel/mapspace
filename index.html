@@ -25,6 +25,20 @@
   <div id="app"></div>
   <script type="module" src="./index.js"></script>
 
+  <div id="context-menu-trail" style="
+  position: absolute;
+  display: none;
+  background: white;
+  border: 1px solid #ccc;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+  z-index: 1000;
+  padding: 8px 0;
+  min-width: 150px;
+  font-family: sans-serif;
+">
+    <div class="context-item" data-action="trail-mode" style="padding: 6px 20px; cursor: pointer;">Trail Mode</div>
+  </div>
+
   <div id="context-menu" style="
   position: absolute;
   display: none;
@@ -36,10 +50,11 @@
   min-width: 150px;
   font-family: sans-serif;
 ">
-  <div class="context-item" data-action="Create trail" style="padding: 6px 20px; cursor: pointer;">Create Trail</div>
-  <div class="context-item" data-action="Replace trail" style="padding: 6px 20px; cursor: pointer;">Replace Trail</div>
-  <div class="context-item" data-action="Deselect" style="padding: 6px 20px; cursor: pointer;">Deselect</div>
-</div>
+    <div class="context-item" data-action="Create trail" style="padding: 6px 20px; cursor: pointer;">Create Trail</div>
+    <div class="context-item" data-action="Replace trail" style="padding: 6px 20px; cursor: pointer;">Replace Trail
+    </div>
+    <div class="context-item" data-action="Deselect" style="padding: 6px 20px; cursor: pointer;">Deselect</div>
+  </div>
 </body>
 
 </html>
