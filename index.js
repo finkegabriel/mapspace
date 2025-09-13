@@ -161,6 +161,7 @@ contextMenuTrail.addEventListener('click', function (evt) {
   if (action !== 'trail-mode') return;
 
   isCreatingTrail = true;
+  document.body.style.cursor = 'crosshair';
 
   // Create a new LineString feature with empty coordinates
   const newFeature = new Feature(new LineString([]));
@@ -232,6 +233,7 @@ contextMenu.addEventListener('click', function (evt) {
       }
 
       selectedFeature.setStyle(selectedStyle);
+      document.body.style.cursor = 'auto';
       break;
 
     case 'Deselect':
@@ -249,11 +251,11 @@ contextMenu.addEventListener('click', function (evt) {
       }
 
       isCreatingTrail = false;
-
+      document.body.style.cursor = 'auto';
       break;
     case 'trail-mode': {
       isCreatingTrail = true;
-
+      
       originalCoords = [...selectedFeature.getGeometry().getCoordinates()]; // save a copy
       const coords = originalCoords.map(coord => [...coord]); // use a deep copy
       const points = coords.map(coord => new Feature(new Point(coord)));
