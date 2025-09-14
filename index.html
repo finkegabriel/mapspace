@@ -1,4 +1,4 @@
-<!doctype html>
+<!-- <!doctype html>
 <html lang="en">
 
 <head>
@@ -55,6 +55,148 @@
     </div>
     <div class="context-item" data-action="Deselect" style="padding: 6px 20px; cursor: pointer;">Deselect</div>
   </div>
+</body>
+
+</html> -->
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mapspace</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+
+    #app {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Sidebar styles */
+    #sidebar {
+      position: fixed;
+      top: 0;
+      left: -250px;
+      /* start hidden */
+      width: 250px;
+      height: 100%;
+      background: #f8f9fa;
+      box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
+      transition: left 0.3s ease;
+      z-index: 2000;
+      padding: 0rem;
+      font-family: sans-serif;
+    }
+
+    #sidebar.active {
+      left: 0;
+    }
+
+    textarea {
+      resize: none;
+    }
+
+    /* Toggle button */
+    #sidebar-toggle {
+      position: fixed;
+      top: 3rem;
+      left: 0;
+      /* start aligned with sidebar edge */
+      z-index: 2100;
+      background: gray;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      border-radius: 4px;
+      font-family: sans-serif;
+      transition: left 0.3s ease;
+      /* animate with sidebar */
+    }
+
+    /* When sidebar is open, shift button to sidebar width */
+    #sidebar.active~#sidebar-toggle {
+      left: 250px;
+    }
+
+    #sidebar h2 {
+      margin-top: 0;
+    }
+
+    /* Optional: push map when sidebar open */
+    #app.shifted {
+      margin-left: 250px;
+      transition: margin-left 0.3s ease;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <h2>Input Data</h2>
+    <label for="myLargeTextBox">GeoJSON</label>
+    <textarea id="myLargeTextBox" name="userMessage" rows="1" cols="1" placeholder="Input data goes here"
+      style="width: 242px; height: 664px;"></textarea>
+  </div>
+
+  <!-- Sidebar toggle button -->
+  <button id="sidebar-toggle">☰</button>
+
+
+  <!-- Map container -->
+  <div id="app"></div>
+  <script type="module" src="./index.js"></script>
+
+  <!-- Context Menus -->
+  <div id="context-menu-trail" style="
+    position: absolute;
+    display: none;
+    background: white;
+    border: 1px solid #ccc;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+    z-index: 1000;
+    padding: 8px 0;
+    min-width: 150px;
+    font-family: sans-serif;
+  ">
+    <div class="context-item" data-action="trail-mode" style="padding: 6px 20px; cursor: pointer;">Trail Mode</div>
+  </div>
+
+  <div id="context-menu" style="
+    position: absolute;
+    display: none;
+    background: white;
+    border: 1px solid #ccc;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+    z-index: 1000;
+    padding: 8px 0;
+    min-width: 150px;
+    font-family: sans-serif;
+  ">
+    <div class="context-item" data-action="Create trail" style="padding: 6px 20px; cursor: pointer;">Create Trail</div>
+    <div class="context-item" data-action="Replace trail" style="padding: 6px 20px; cursor: pointer;">Replace Trail
+    </div>
+    <div class="context-item" data-action="Deselect" style="padding: 6px 20px; cursor: pointer;">Deselect</div>
+  </div>
+
+  <script>
+    const sidebar = document.getElementById('sidebar');
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    const app = document.getElementById('app');
+
+    toggleBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('active');
+      app.classList.toggle('shifted');
+    });
+  </script>
 </body>
 
 </html>
