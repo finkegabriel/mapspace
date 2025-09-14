@@ -12,6 +12,7 @@ import VectorSource from 'ol/source/Vector';
 import Stroke from 'ol/style/Stroke';
 import Style from 'ol/style/Style';
 import { fromLonLat } from 'ol/proj';
+import GeoJSON from 'ol/format/GeoJSON.js';
 
 // Default and selected styles
 const defaultStyle = new Style({
@@ -45,7 +46,7 @@ const map = new Map({
 
 const coords = [];
 const lineFeature = new Feature(new LineString(coords));
-lineFeature.setId('mesa-line');
+lineFeature.setId('line');
 lineFeature.setStyle(defaultStyle);
 
 // Vector layer and source
@@ -63,6 +64,20 @@ const trailFeatures = [];
 
 const contextMenu = document.getElementById('context-menu');
 const contextMenuTrail = document.getElementById('context-menu-trail');
+
+const textarea = document.getElementById('geojson');
+const format = new GeoJSON();
+
+function updateTextarea() {
+  // Get all features, convert to GeoJSON
+  const features = vectorSource.getFeatures();
+  const geojson = format.writeFeatures(features, {
+    featureProjection: map.getView().getProjection()
+  });
+
+  // Update textarea
+  textarea.value = geojson;
+}
 
 // CLICK TO SELECT/DESELECT
 map.on('singleclick', function (evt) {
@@ -159,6 +174,7 @@ contextMenuTrail.addEventListener('click', function (evt) {
 
   vectorSource.addFeature(newFeature);
   trailFeatures.push(newFeature);
+
   selectedFeature = newFeature;
 
   if (vertexLayer) map.removeLayer(vertexLayer);
@@ -197,19 +213,26 @@ contextMenu.addEventListener('click', function (evt) {
           source: new VectorSource({ features: points }),
         });
         map.addLayer(vertexLayer);
+        // --- Update whenever features change ---
+        // vectorSource.on('removefeature', updateTextarea);
       }
       break;
     }
-
     case 'Replace trail':
       if (isCreatingTrail) {
+        // finalize trail editing
         originalCoords = null;
         isCreatingTrail = false;
+
         if (vertexLayer) {
           map.removeLayer(vertexLayer);
           vertexLayer = null;
         }
+
+        // update textarea with all current features
+        updateTextarea();
       }
+
       selectedFeature.setStyle(selectedStyle);
       document.body.style.cursor = 'auto';
       break;
