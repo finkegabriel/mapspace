@@ -44,6 +44,15 @@ const map = new Map({
   })
 });
 
+const current_view = map.getView();
+
+current_view.on('change:resolution', function () {
+  const zooms = current_view.getZoom();
+  // console.log('Zoom level changed to:', zooms);
+  // handleZoomChange(currentZoom); 
+});
+
+
 const coords = [];
 const lineFeature = new Feature(new LineString(coords));
 lineFeature.setId('line');
@@ -175,6 +184,10 @@ contextMenuTrail.addEventListener('click', function (evt) {
   vectorSource.addFeature(newFeature);
   trailFeatures.push(newFeature);
 
+  map.on('singleclick', (evt) => {
+    console.log("points ", newFeature);
+  });
+
   selectedFeature = newFeature;
 
   if (vertexLayer) map.removeLayer(vertexLayer);
@@ -207,7 +220,6 @@ contextMenu.addEventListener('click', function (evt) {
         });
 
         points.forEach(pt => pt.setStyle(pointStyle));
-
         if (vertexLayer) map.removeLayer(vertexLayer);
         vertexLayer = new VectorLayer({
           source: new VectorSource({ features: points }),
