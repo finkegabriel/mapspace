@@ -29,8 +29,10 @@ const selectedStyle = new Style({
   }),
 });
 
+// Configure canvas for frequent pixel reads
 const map = new Map({
   target: 'app',
+  pixelRatio: 1,
   layers: [
     new TileLayer({
       source: new XYZ({
@@ -70,6 +72,9 @@ let vertexLayer = null;
 let isCreatingTrail = false;
 let originalCoords = null;
 const trailFeatures = [];
+let selectedVertexIndex = -1; // Track the currently selected vertex
+let isBranching = false; // Track if we're in branch creation mode
+let branchStartCoord = null; // Store the starting coordinate for the branch
 
 const contextMenu = document.getElementById('context-menu');
 const contextMenuTrail = document.getElementById('context-menu-trail');
@@ -102,6 +107,7 @@ map.on('singleclick', function (evt) {
     if (!isCreatingTrail && selectedFeature) {
       selectedFeature.setStyle(defaultStyle);
       selectedFeature = null;
+      selectedVertexIndex = -1;
 
       contextMenu.style.display = 'none';
       if (vertexLayer) {
@@ -112,32 +118,117 @@ map.on('singleclick', function (evt) {
   }
 });
 
+// Function to update all vertices
+function updateVertices() {
+  if (!vertexLayer || !selectedFeature) return;
+  
+  const coords = selectedFeature.getGeometry().getCoordinates();
+  vertexLayer.getSource().clear();
+  
+  coords.forEach((coord, index) => {
+    if (coord && Array.isArray(coord) && coord.length >= 2) {
+      const vertex = new Feature(new Point(coord));
+      const isSelected = index === selectedVertexIndex;
+      
+      vertex.setStyle(new Style({
+        image: new CircleStyle({
+          radius: isSelected ? 8 : 6,
+          fill: new Fill({ color: isSelected ? 'yellow' : 'red' }),
+          stroke: new Stroke({ color: isSelected ? 'black' : 'white', width: 2 }),
+        }),
+      }));
+      
+      vertexLayer.getSource().addFeature(vertex);
+    }
+  });
+}
+
 // ADD TRAIL POINTS (always create new vertex feature, even if overlap)
 map.on('click', function (evt) {
   if (!isCreatingTrail || !selectedFeature) return;
 
   const featureAtPixel = map.forEachFeatureAtPixel(evt.pixel, f => f);
+  
+  // Handle first click for a new trail
+  if (selectedFeature.get('isFirstPoint')) {
+    const geometry = selectedFeature.getGeometry();
+    geometry.setCoordinates([evt.coordinate]);
+    selectedFeature.unset('isFirstPoint');
+    selectedVertexIndex = 0;
+    updateVertices();
+    return;
+  }
+
+  // Handle clicks when a vertex is highlighted for branching
+  if (selectedVertexIndex !== -1) {
+    const clickedCoord = evt.coordinate;
+    const geometry = selectedFeature.getGeometry();
+    const coords = geometry.getCoordinates();
+    
+    // Store the original coordinates before branching if not already stored
+    if (!selectedFeature.get('originalCoords')) {
+      selectedFeature.set('originalCoords', [...coords]);
+    }
+    
+    // Create a new branch from the selected vertex
+    const currentCoords = [...coords]; // Copy current coordinates
+    const newBranch = currentCoords.slice(0, selectedVertexIndex + 1); // Keep up to selected vertex
+    newBranch.push(clickedCoord); // Add the new point
+    
+    // Update the coordinates with the new branch
+    geometry.setCoordinates(newBranch);
+    
+    // Update vertex selection to the new point
+    selectedVertexIndex = newBranch.length - 1;
+    
+    // Update vertices display
+    updateVertices();
+    
+    return;
+  }
+
+  // Normal trail creation logic
   if (featureAtPixel && featureAtPixel !== selectedFeature) return;
 
   const geometry = selectedFeature.getGeometry();
   if (geometry.getType() !== 'LineString') return;
 
   const coords = geometry.getCoordinates();
-  coords.push(evt.coordinate);
+  
+  // If we're branching and this is the first point, make sure we start from the branch point
+  if (isBranching && coords.length === 1) {
+    coords[0] = branchStartCoord;
+  }
+  
+  // If we have a selected vertex, insert the new point after it
+  if (selectedVertexIndex !== -1) {
+    // Insert the new point after the selected vertex
+    coords.splice(selectedVertexIndex + 1, 0, evt.coordinate);
+    // Update the selected vertex to the newly added point
+    selectedVertexIndex++;
+  } else {
+    // If no vertex is selected, add to the end as before
+    coords.push(evt.coordinate);
+    selectedVertexIndex = coords.length - 1; // Select the newly added vertex
+  }
+  
   geometry.setCoordinates(coords);
 
-  // Always add a new red vertex dot, even if it overlaps
-  const newVertex = new Feature(new Point(evt.coordinate));
-  newVertex.setStyle(new Style({
-    image: new CircleStyle({
-      radius: 6,
-      fill: new Fill({ color: 'red' }),
-      stroke: new Stroke({ color: 'white', width: 2 }),
-    }),
-  }));
+  // Ensure vertex layer exists
+  if (!vertexLayer) {
+    vertexLayer = new VectorLayer({
+      source: new VectorSource()
+    });
+    map.addLayer(vertexLayer);
+  }
 
-  if (vertexLayer && vertexLayer.getSource()) {
-    vertexLayer.getSource().addFeature(newVertex); // no checks
+  // Update vertices
+  updateVertices();
+
+  // Reset branching state after first point is added
+  if (isBranching) {
+    isBranching = false;
+    branchStartCoord = null;
   }
 });
 
@@ -169,6 +260,42 @@ document.addEventListener('click', function (evt) {
   }
 });
 
+// Handle keyboard navigation for vertices
+document.addEventListener('keydown', function(evt) {
+  if (!selectedFeature || !vertexLayer) return;
+  
+  const coords = selectedFeature.getGeometry().getCoordinates();
+  if (coords.length === 0) return;
+
+  if (evt.ctrlKey) {
+    // Update vertex selection based on arrow key
+    if (evt.key === 'ArrowLeft') {
+      selectedVertexIndex = selectedVertexIndex <= 0 ? coords.length - 1 : selectedVertexIndex - 1;
+      highlightVertex(selectedVertexIndex);
+    } else if (evt.key === 'ArrowRight') {
+      selectedVertexIndex = selectedVertexIndex >= coords.length - 1 ? 0 : selectedVertexIndex + 1;
+      highlightVertex(selectedVertexIndex);
+    }
+  // Only handle Ctrl+Arrow keys for vertex navigation
+  }
+});
+
+// Function to highlight the selected vertex
+function highlightVertex(index) {
+  if (!vertexLayer || !selectedFeature) return;
+  
+  const coords = selectedFeature.getGeometry().getCoordinates();
+  if (index < 0 || index >= coords.length) return;
+
+  updateVertices();
+  
+  // Center the map on the selected vertex
+  map.getView().animate({
+    center: coords[index],
+    duration: 200
+  });
+}
+
 // CONTEXT MENU: TRAIL MODE (empty trail)
 contextMenuTrail.addEventListener('click', function (evt) {
   const action = evt.target.getAttribute('data-action');
@@ -177,21 +304,28 @@ contextMenuTrail.addEventListener('click', function (evt) {
   isCreatingTrail = true;
   document.body.style.cursor = 'crosshair';
 
+  // Initialize with a first point at click location
   const newFeature = new Feature(new LineString([]));
   newFeature.setId(`trail-${Date.now()}`);
   newFeature.setStyle(selectedStyle);
+  newFeature.set('isFirstPoint', true);
 
   vectorSource.addFeature(newFeature);
   trailFeatures.push(newFeature);
-
-  map.on('singleclick', (evt) => {
-    console.log("points ", newFeature);
-  });
-
   selectedFeature = newFeature;
 
+  // Create fresh vertex layer
   if (vertexLayer) map.removeLayer(vertexLayer);
-  vertexLayer = new VectorLayer({ source: new VectorSource() });
+  vertexLayer = new VectorLayer({ 
+    source: new VectorSource(),
+    style: new Style({
+      image: new CircleStyle({
+        radius: 6,
+        fill: new Fill({ color: 'red' }),
+        stroke: new Stroke({ color: 'white', width: 2 }),
+      }),
+    })
+  });
   map.addLayer(vertexLayer);
 
   contextMenuTrail.style.display = 'none';
@@ -207,24 +341,35 @@ contextMenu.addEventListener('click', function (evt) {
       if (selectedFeature.getGeometry().getType() === 'LineString') {
         isCreatingTrail = true;
 
+        // Store original coordinates
         originalCoords = [...selectedFeature.getGeometry().getCoordinates()];
         const coords = originalCoords.map(coord => [...coord]);
-        const points = coords.map(coord => new Feature(new Point(coord)));
 
-        const pointStyle = new Style({
-          image: new CircleStyle({
-            radius: 6,
-            fill: new Fill({ color: 'red' }),
-            stroke: new Stroke({ color: 'white', width: 2 }),
-          }),
-        });
+        // Remove any existing vertex layer
+        if (vertexLayer) {
+          map.removeLayer(vertexLayer);
+        }
 
-        points.forEach(pt => pt.setStyle(pointStyle));
-        if (vertexLayer) map.removeLayer(vertexLayer);
+        // Create new vertex layer
         vertexLayer = new VectorLayer({
-          source: new VectorSource({ features: points }),
+          source: new VectorSource()
         });
         map.addLayer(vertexLayer);
+
+        // Add vertices for existing points
+        coords.forEach((coord, index) => {
+          if (coord && Array.isArray(coord) && coord.length >= 2) {
+            const vertex = new Feature(new Point(coord));
+            vertex.setStyle(new Style({
+              image: new CircleStyle({
+                radius: 6,
+                fill: new Fill({ color: 'red' }),
+                stroke: new Stroke({ color: 'white', width: 2 }),
+              }),
+            }));
+            vertexLayer.getSource().addFeature(vertex);
+          }
+        });
         // --- Update whenever features change ---
         // vectorSource.on('removefeature', updateTextarea);
       }
@@ -232,8 +377,26 @@ contextMenu.addEventListener('click', function (evt) {
     }
     case 'Replace trail':
       if (isCreatingTrail) {
-        // finalize trail editing
-        originalCoords = null;
+        // Create a new feature with the current state of the LineString
+        const currentCoords = selectedFeature.getGeometry().getCoordinates();
+        const originalCoords = selectedFeature.get('originalCoords');
+        
+        if (originalCoords) {
+          // Create a new feature for the branch
+          const branchFeature = new Feature(new LineString(currentCoords));
+          branchFeature.setId(`trail-${Date.now()}`);
+          branchFeature.setStyle(selectedStyle);
+          
+          // Restore original coordinates to the parent feature
+          selectedFeature.getGeometry().setCoordinates(originalCoords);
+          selectedFeature.setStyle(defaultStyle);
+          selectedFeature.unset('originalCoords');
+          
+          // Add the new branch feature
+          vectorSource.addFeature(branchFeature);
+          selectedFeature = branchFeature;
+        }
+        
         isCreatingTrail = false;
 
         if (vertexLayer) {
@@ -241,7 +404,7 @@ contextMenu.addEventListener('click', function (evt) {
           vertexLayer = null;
         }
 
-        // update textarea with all current features
+        // update textarea with all features
         updateTextarea();
       }
 
