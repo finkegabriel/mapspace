@@ -467,45 +467,12 @@ contextMenu.addEventListener('click', function (evt) {
         const currentCoords = selectedFeature.getGeometry().getCoordinates();
         const originalCoords = selectedFeature.get('originalCoords');
         
+        // Finalize trail editing without splitting: keep the extended segments as part of the same LineString.
+        // If originalCoords exists it was stored for a potential split; we'll clear that marker and keep
+        // the current coordinates on the same feature. Use explicit 'split-vertex' or keyboard 'B' to split later.
         if (originalCoords) {
-          // If the feature has a recorded branchStart, split only that appended portion into the branch
-          const branchStart = selectedFeature.get('branchStart');
-          let branchCoords = currentCoords;
-
-          if (typeof branchStart === 'number' && branchStart >= 0 && branchStart < currentCoords.length) {
-            branchCoords = currentCoords.slice(branchStart);
-          }
-
-          // Create a new feature for the branch (only the appended branch coordinates)
-          const branchFeature = new Feature(new LineString(branchCoords));
-          branchFeature.setId(`trail-${Date.now()}`);
-          branchFeature.setStyle(selectedStyle);
-
-          // Restore original coordinates to the parent feature and clear its selection/properties
-          selectedFeature.getGeometry().setCoordinates(originalCoords);
-          selectedFeature.setStyle(defaultStyle);
           selectedFeature.unset('originalCoords');
           selectedFeature.unset('branchStart');
-
-          // Add the new branch feature to the source
-          vectorSource.addFeature(branchFeature);
-
-          // Make the branch the only editable trail in this editing session so only its vertices are shown
-          trailFeatures.length = 0;
-          trailFeatures.push(branchFeature);
-
-          // Select the new branch
-          selectedFeature = branchFeature;
-          selectedFeature.setStyle(selectedStyle);
-
-          // Deselect other line features visually
-          vectorSource.getFeatures().forEach(f => {
-            if (f !== branchFeature) f.setStyle(defaultStyle);
-          });
-
-          // Rebuild vertices and select the first (and only) vertex of the new branch
-          updateVertices();
-          setGlobalSelected(0);
         }
         
         isCreatingTrail = false;
@@ -519,9 +486,9 @@ contextMenu.addEventListener('click', function (evt) {
         updateTextarea();
       }
 
-      // Ensure visual state: all features default, selectedFeature (branch) highlighted
-      vectorSource.getFeatures().forEach(f => f.setStyle(defaultStyle));
-      if (selectedFeature) selectedFeature.setStyle(selectedStyle);
+  // Ensure visual state: deselect editing UI but keep the edited feature highlighted
+  vectorSource.getFeatures().forEach(f => f.setStyle(defaultStyle));
+  if (selectedFeature) selectedFeature.setStyle(selectedStyle);
       document.body.style.cursor = 'auto';
       break;
 
