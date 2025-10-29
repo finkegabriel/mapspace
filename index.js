@@ -389,6 +389,71 @@ document.addEventListener('keydown', function(evt) {
   }
 });
 
+// Keyboard shortcut: Backspace to delete the currently selected global vertex
+document.addEventListener('keydown', function(evt) {
+  if (evt.key === 'Backspace') {
+    // Only act if a vertex is selected
+    if (globalSelectedIndex === -1 || !vertexMap || vertexMap.length === 0) return;
+    evt.preventDefault();
+
+    const entry = vertexMap[globalSelectedIndex];
+    if (!entry) return;
+
+    const feat = entry.feature;
+    const geom = feat && feat.getGeometry ? feat.getGeometry() : null;
+    if (!geom || geom.getType() !== 'LineString') return;
+
+    // Work on a copied coords array to avoid shared-reference mutation
+    const coords = geom.getCoordinates().slice();
+    const delIdx = entry.index;
+
+    // Remove the selected vertex
+    coords.splice(delIdx, 1);
+
+    // If the feature is left with <= 1 coordinate, remove the entire feature
+    if (coords.length <= 1) {
+      // Remove from source and editable lists
+      vectorSource.removeFeature(feat);
+      const ti = trailFeatures.indexOf(feat);
+      if (ti !== -1) trailFeatures.splice(ti, 1);
+      if (selectedFeature === feat) selectedFeature = null;
+
+      // Refresh UI and selections
+      updateVertices();
+      globalSelectedIndex = -1;
+      selectedVertexIndex = -1;
+      updateTextarea();
+      return;
+    }
+
+    // Otherwise update the geometry with the removed vertex
+    geom.setCoordinates(coords);
+
+    // Adjust branchStart metadata if present
+    const bs = feat.get('branchStart');
+    if (bs !== undefined && bs !== null) {
+      if (delIdx < bs) {
+        feat.set('branchStart', bs - 1);
+      }
+      // If delIdx === bs we keep branchStart the same index because the next vertex
+      // shifts into that position. If delIdx > bs no change.
+    }
+
+    // Refresh vertices and pick a sensible nearby selection (same index or previous)
+    updateVertices();
+    // Compute new selection index for the feature (cap to last available)
+    const remainingCount = vertexMap.filter(e => e.feature === feat).length;
+    const chooseIdx = Math.min(delIdx, Math.max(0, remainingCount - 1));
+    const newG = vertexMap.findIndex(e => e.feature === feat && e.index === chooseIdx);
+    if (newG !== -1) setGlobalSelected(newG); else {
+      globalSelectedIndex = -1;
+      selectedVertexIndex = -1;
+    }
+
+    updateTextarea();
+  }
+});
+
 // Function to highlight the selected vertex
 function highlightVertex(index) {
   if (!vertexLayer || !selectedFeature) return;
