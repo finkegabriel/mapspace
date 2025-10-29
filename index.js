@@ -410,8 +410,10 @@ document.addEventListener('keydown', function(evt) {
     // Remove the selected vertex
     coords.splice(delIdx, 1);
 
-    // If the feature is left with <= 1 coordinate, remove the entire feature
-    if (coords.length <= 1) {
+    // If the feature is left with 0 coordinates, remove the entire feature.
+    // If it has 1 coordinate remaining, preserve that single point until the user
+    // explicitly deletes it with another Backspace press.
+    if (coords.length === 0) {
       // Remove from source and editable lists
       vectorSource.removeFeature(feat);
       const ti = trailFeatures.indexOf(feat);
@@ -426,7 +428,7 @@ document.addEventListener('keydown', function(evt) {
       return;
     }
 
-    // Otherwise update the geometry with the removed vertex
+    // Otherwise update the geometry with the removed vertex (including the single-point case)
     geom.setCoordinates(coords);
 
     // Adjust branchStart metadata if present
