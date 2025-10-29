@@ -183,6 +183,29 @@ function setGlobalSelected(gIndex) {
   }
 }
 
+// Create a new branch feature starting at a given vertex (does NOT remove or change the parent).
+function createBranchFromVertex(parentEntry) {
+  if (!parentEntry) return;
+  const start = parentEntry.coord;
+  const branchFeature = new Feature(new LineString([start]));
+  branchFeature.setId(`trail-${Date.now()}`);
+  branchFeature.setStyle(selectedStyle);
+
+  // Add branch to source and make it the only editable trail
+  vectorSource.addFeature(branchFeature);
+  trailFeatures.length = 0;
+  trailFeatures.push(branchFeature);
+
+  selectedFeature = branchFeature;
+  isBranching = true;
+  branchParent = { feature: parentEntry.feature, index: parentEntry.index };
+
+  updateVertices();
+  // select the branch start vertex
+  const idx = vertexMap.findIndex(e => e.feature === branchFeature && e.index === 0);
+  if (idx !== -1) setGlobalSelected(idx);
+}
+
 // ADD TRAIL POINTS (handles appending, inserting and branching while keeping all trail features editable)
 map.on('click', function (evt) {
   // Only handle clicks while in trail creation mode
@@ -209,9 +232,8 @@ map.on('click', function (evt) {
   }
 
   // If a global vertex is selected and the click is on empty map (not on an existing line or vertex),
-  // insert the clicked point into the SAME LineString after the selected vertex.
-  // NOTE: Do NOT auto-create a new branch feature here — separate LineStrings are created only via the
-  // 'Replace trail' context-menu action. This preserves single LineString segments unless explicitly split.
+  // then branch if the selected vertex is not the last vertex of its LineString (create a new LineString
+  // starting at that vertex). If the selected vertex is the last vertex, append to the same LineString.
   if (globalSelectedIndex !== -1) {
     const clickedOnVertex = featureAtPixel && featureAtPixel.get('gIndex') !== undefined;
     const clickedOnLine = featureAtPixel && featureAtPixel.getGeometry && featureAtPixel.getGeometry().getType() === 'LineString';
@@ -220,24 +242,58 @@ map.on('click', function (evt) {
       const parentEntry = vertexMap[globalSelectedIndex];
       const parentFeature = parentEntry.feature;
       const parentIdx = parentEntry.index;
+      const parentGeom = parentFeature.getGeometry();
+      const parentCoords = parentGeom.getCoordinates();
 
-      // Insert new coordinate into the parent feature right after the selected vertex
-  const parentGeom = parentFeature.getGeometry();
-  // Copy coordinates array to avoid mutating any references used elsewhere
-  const parentCoords = parentGeom.getCoordinates().slice();
-  parentCoords.splice(parentIdx + 1, 0, evt.coordinate);
-  parentGeom.setCoordinates(parentCoords);
+      // If selected vertex is not the last vertex, start an in-place branch edit
+      // by inserting the clicked point into the parent LineString after selected vertex
+      // but first store the original coordinates so the user can 'Replace trail' later
+      if (parentIdx < parentCoords.length - 1) {
+        // When branching from an earlier vertex, append the branch to the END of the same LineString
+        // by duplicating the branch start vertex at the end and then adding the new point. This preserves
+        // the original sequence of the parent and avoids moving existing segments.
+        if (!parentFeature.get('originalCoords')) {
+          parentFeature.set('originalCoords', parentCoords.slice());
+        }
 
-      // Ensure the parent feature is selected for editing (if it's not already)
+        const originalLength = parentCoords.length;
+        const newCoords = parentCoords.slice();
+        // duplicate the start vertex so the branch is attached at the end
+        newCoords.push(parentEntry.coord);
+        // add the new clicked coordinate (branch endpoint)
+        newCoords.push(evt.coordinate);
+        parentGeom.setCoordinates(newCoords);
+
+        // record where the branch starts so Replace trail can split it out later
+        parentFeature.set('branchStart', originalLength);
+
+        // Keep editing the same parent feature (branch is part of it until Replace trail)
+        selectedFeature = parentFeature;
+        trailFeatures.length = 0;
+        trailFeatures.push(parentFeature);
+
+        // Update vertex rendering and select the newly inserted branch endpoint
+        updateVertices();
+        setGlobalSelected(vertexMap.findIndex(e => e.feature === parentFeature && e.index === newCoords.length - 1));
+
+        isBranching = true;
+        branchParent = { feature: parentFeature, index: parentIdx };
+        return;
+      }
+
+      // Otherwise append to the end of the parent LineString
+      const newParentCoords = parentCoords.slice();
+      newParentCoords.push(evt.coordinate);
+      parentGeom.setCoordinates(newParentCoords);
+
       selectedFeature = parentFeature;
       if (!trailFeatures.includes(parentFeature)) {
         trailFeatures.length = 0;
         trailFeatures.push(parentFeature);
       }
 
-      // Update vertex rendering and select the newly inserted vertex
       updateVertices();
-      setGlobalSelected(vertexMap.findIndex(e => e.feature === parentFeature && e.index === parentIdx + 1));
+      setGlobalSelected(vertexMap.findIndex(e => e.feature === parentFeature && e.index === newParentCoords.length - 1));
       return;
     }
   }
@@ -322,6 +378,17 @@ document.addEventListener('keydown', function(evt) {
   }
 });
 
+// Keyboard shortcut: 'b' to split/create branch from the currently selected vertex
+document.addEventListener('keydown', function(evt) {
+  if (evt.key === 'b' || evt.key === 'B') {
+    if (globalSelectedIndex !== -1) {
+      const parentEntry = vertexMap[globalSelectedIndex];
+      createBranchFromVertex(parentEntry);
+      evt.preventDefault();
+    }
+  }
+});
+
 // Function to highlight the selected vertex
 function highlightVertex(index) {
   if (!vertexLayer || !selectedFeature) return;
@@ -401,28 +468,36 @@ contextMenu.addEventListener('click', function (evt) {
         const originalCoords = selectedFeature.get('originalCoords');
         
         if (originalCoords) {
-          // Create a new feature for the branch
-          const branchFeature = new Feature(new LineString(currentCoords));
+          // If the feature has a recorded branchStart, split only that appended portion into the branch
+          const branchStart = selectedFeature.get('branchStart');
+          let branchCoords = currentCoords;
+
+          if (typeof branchStart === 'number' && branchStart >= 0 && branchStart < currentCoords.length) {
+            branchCoords = currentCoords.slice(branchStart);
+          }
+
+          // Create a new feature for the branch (only the appended branch coordinates)
+          const branchFeature = new Feature(new LineString(branchCoords));
           branchFeature.setId(`trail-${Date.now()}`);
           branchFeature.setStyle(selectedStyle);
-          
-          // Restore original coordinates to the parent feature and clear its selection
+
+          // Restore original coordinates to the parent feature and clear its selection/properties
           selectedFeature.getGeometry().setCoordinates(originalCoords);
           selectedFeature.setStyle(defaultStyle);
           selectedFeature.unset('originalCoords');
+          selectedFeature.unset('branchStart');
 
           // Add the new branch feature to the source
           vectorSource.addFeature(branchFeature);
 
           // Make the branch the only editable trail in this editing session so only its vertices are shown
-          // (keep the parent in the source but don't include it in trailFeatures)
           trailFeatures.length = 0;
           trailFeatures.push(branchFeature);
 
           // Select the new branch
           selectedFeature = branchFeature;
           selectedFeature.setStyle(selectedStyle);
-          
+
           // Deselect other line features visually
           vectorSource.getFeatures().forEach(f => {
             if (f !== branchFeature) f.setStyle(defaultStyle);
@@ -449,6 +524,15 @@ contextMenu.addEventListener('click', function (evt) {
       if (selectedFeature) selectedFeature.setStyle(selectedStyle);
       document.body.style.cursor = 'auto';
       break;
+
+    case 'split-vertex': {
+      // Create a separate branch feature starting at the currently selected global vertex
+      if (globalSelectedIndex !== -1) {
+        const parentEntry = vertexMap[globalSelectedIndex];
+        createBranchFromVertex(parentEntry);
+      }
+      break;
+    }
 
     case 'Deselect':
       if (isCreatingTrail && originalCoords) {
