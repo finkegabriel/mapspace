@@ -75,6 +75,19 @@
       margin-left: 250px;
       transition: margin-left 0.3s ease;
     }
+
+    #bottom_panel {
+      position: absolute;
+      bottom: 0;
+      left: 40%;
+      width: 25%;
+      height: 35px;
+      background-color: darkgray;
+      border-top: 1px solid #ccc;
+      border-radius: 25px 25px 0 0;
+      z-index: 1000;
+    }
+
   </style>
 </head>
 
@@ -92,7 +105,9 @@
 
 
   <!-- Map container -->
-  <div id="app"></div>
+  <div id="app">
+    <div id="bottom_panel"></div>
+  </div>
   <script type="module" src="./index.js"></script>
 
   <!-- Context Menus -->
