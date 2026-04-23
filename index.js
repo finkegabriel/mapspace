@@ -142,16 +142,76 @@ const textarea = document.getElementById('geojson');
 const format = new GeoJSON();
 
 function updateTextarea() {
-  // Get all features, convert to GeoJSON
   const features = vectorSource.getFeatures();
   const geojson = format.writeFeatures(features, {
     featureProjection: map.getView().getProjection(),
     dataProjection: 'EPSG:4326'
   });
-
-  // Update textarea
   textarea.value = geojson;
 }
+
+function applyGeomStyle(feature) {
+  const type = feature.getGeometry().getType();
+  if (type === 'Polygon') {
+    feature.setStyle(new Style({
+      stroke: new Stroke({ color: 'green', width: 2 }),
+      fill: new Fill({ color: 'rgba(0, 255, 0, 0.1)' }),
+    }));
+  } else {
+    feature.setStyle(defaultStyle);
+  }
+}
+
+textarea.addEventListener('input', function () {
+  const text = textarea.value.trim();
+  if (!text) return;
+
+  let parsed;
+  try {
+    parsed = format.readFeatures(text, {
+      featureProjection: map.getView().getProjection(),
+      dataProjection: 'EPSG:4326',
+    });
+  } catch (e) {
+    return; // invalid / incomplete JSON while typing — ignore
+  }
+  if (!parsed || parsed.length === 0) return;
+
+  // Exit trail mode if active
+  isCreatingTrail = false;
+  document.body.style.cursor = 'auto';
+  selectedFeature = null;
+  globalSelectedIndex = -1;
+  trailFeatures.length = 0;
+  isBranching = false;
+  if (vertexLayer) { map.removeLayer(vertexLayer); vertexLayer = null; }
+
+  vectorSource.clear();
+  parsed.forEach(f => {
+    applyGeomStyle(f);
+    vectorSource.addFeature(f);
+  });
+});
+
+document.getElementById('clear-map').addEventListener('click', function () {
+  isCreatingTrail = false;
+  document.body.style.cursor = 'auto';
+  selectedFeature = null;
+  globalSelectedIndex = -1;
+  trailFeatures.length = 0;
+  isBranching = false;
+  if (vertexLayer) { map.removeLayer(vertexLayer); vertexLayer = null; }
+  vectorSource.clear();
+  textarea.value = '';
+});
+
+document.getElementById('format-json').addEventListener('click', function () {
+  const text = textarea.value.trim();
+  if (!text) return;
+  try {
+    textarea.value = JSON.stringify(JSON.parse(text), null, 2);
+  } catch (e) { /* invalid JSON, leave as-is */ }
+});
 
 // CLICK TO SELECT/DESELECT
 map.on('singleclick', function (evt) {
