@@ -7,6 +7,7 @@ import TileLayer from './node_modules/ol/layer/Tile';
 import XYZ from './node_modules/ol/source/XYZ';
 import Feature from 'ol/Feature';
 import LineString from 'ol/geom/LineString';
+import Polygon from 'ol/geom/Polygon';
 import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import Stroke from 'ol/style/Stroke';
@@ -74,6 +75,39 @@ let branchParent = null; // { feature, index } when a branch was created
 // If true, the map will smoothly center on the selected vertex. Default false to avoid panning on clicks.
 let autoPanOnSelect = false;
 
+// Helper function to check if a coordinate is near an existing vertex
+function isNearVertex(coord, threshold = 10) {
+  const pixel = map.getPixelFromCoordinate(coord);
+  for (let entry of vertexMap) {
+    const vertexPixel = map.getPixelFromCoordinate(entry.coord);
+    const distance = Math.sqrt(
+      Math.pow(pixel[0] - vertexPixel[0], 2) + Math.pow(pixel[1] - vertexPixel[1], 2)
+    );
+    if (distance <= threshold) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+// Helper function to check if coordinate is near the first vertex of current trail
+function isNearFirstVertex(coord, threshold = 10) {
+  if (!selectedFeature || !isCreatingTrail) return false;
+  const geometry = selectedFeature.getGeometry();
+  if (!geometry || geometry.getType() !== 'LineString') return false;
+  
+  const coords = geometry.getCoordinates();
+  if (coords.length < 3) return false; // Need at least 3 points to close a polygon
+  
+  const firstCoord = coords[0];
+  const pixel = map.getPixelFromCoordinate(coord);
+  const firstPixel = map.getPixelFromCoordinate(firstCoord);
+  const distance = Math.sqrt(
+    Math.pow(pixel[0] - firstPixel[0], 2) + Math.pow(pixel[1] - firstPixel[1], 2)
+  );
+  return distance <= threshold;
+}
+
 const contextMenu = document.getElementById('context-menu');
 const contextMenuTrail = document.getElementById('context-menu-trail');
 
@@ -96,7 +130,7 @@ function updateTextarea() {
 map.on('singleclick', function (evt) {
   const clickedFeature = map.forEachFeatureAtPixel(evt.pixel, f => f);
 
-  if (clickedFeature && clickedFeature.getGeometry().getType() === 'LineString') {
+  if (clickedFeature && (clickedFeature.getGeometry().getType() === 'LineString' || clickedFeature.getGeometry().getType() === 'Polygon' || clickedFeature.getGeometry().getType() === 'Point')) {
     // Make sure only this feature is highlighted; set all other features to default
     vectorSource.getFeatures().forEach(f => {
       if (f === clickedFeature) {
@@ -144,8 +178,21 @@ function updateVertices() {
   vertexMap = [];
   trailFeatures.forEach(feat => {
     const geometry = feat.getGeometry();
-    if (!geometry || geometry.getType() !== 'LineString') return;
-    const coords = geometry.getCoordinates();
+    if (!geometry) return;
+    
+    let coords = [];
+    if (geometry.getType() === 'LineString') {
+      coords = geometry.getCoordinates();
+    } else if (geometry.getType() === 'Polygon') {
+      // For polygons, get the outer ring coordinates
+      coords = geometry.getCoordinates()[0] || [];
+    } else if (geometry.getType() === 'Point') {
+      // For points, create a single coordinate entry
+      coords = [geometry.getCoordinates()];
+    } else {
+      return; // Skip other geometry types
+    }
+    
     coords.forEach((coord, idx) => {
       vertexMap.push({ feature: feat, index: idx, coord });
     });
@@ -231,9 +278,44 @@ map.on('click', function (evt) {
     return;
   }
 
-  // If a global vertex is selected and the click is on empty map (not on an existing line or vertex),
-  // then branch if the selected vertex is not the last vertex of its LineString (create a new LineString
-  // starting at that vertex). If the selected vertex is the last vertex, append to the same LineString.
+  // Check if clicking near the first vertex to close polygon
+  if (isNearFirstVertex(evt.coordinate)) {
+    const geometry = selectedFeature.getGeometry();
+    const coords = geometry.getCoordinates();
+    // Close the polygon by converting LineString to Polygon
+    const polygonCoords = [coords];
+    const polygon = new Polygon(polygonCoords);
+    selectedFeature.setGeometry(polygon);
+    selectedFeature.setStyle(new Style({
+      stroke: new Stroke({
+        color: 'green',
+        width: 2,
+      }),
+      fill: new Fill({
+        color: 'rgba(0, 255, 0, 0.1)',
+      }),
+    }));
+    
+    // Exit trail creation mode
+    isCreatingTrail = false;
+    document.body.style.cursor = 'auto';
+    updateVertices();
+    updateTextarea();
+    return;
+  }
+
+  // Check if clicking near an existing vertex to connect to it
+  const nearVertex = isNearVertex(evt.coordinate);
+  if (nearVertex) {
+    // Connect to the existing vertex
+    const geometry = selectedFeature.getGeometry();
+    const coords = geometry.getCoordinates();
+    coords.push(nearVertex.coord);
+    geometry.setCoordinates(coords);
+    updateVertices();
+    setGlobalSelected(vertexMap.findIndex(e => e.feature === selectedFeature && e.index === coords.length - 1));
+    return;
+  }
   if (globalSelectedIndex !== -1) {
     const clickedOnVertex = featureAtPixel && featureAtPixel.get('gIndex') !== undefined;
     const clickedOnLine = featureAtPixel && featureAtPixel.getGeometry && featureAtPixel.getGeometry().getType() === 'LineString';
@@ -335,6 +417,35 @@ map.on('click', function (evt) {
   setGlobalSelected(vertexMap.findIndex(e => e.feature === selectedFeature && e.index === coords.length - 1));
 });
 
+// Double-click to finish trail as point (if only one vertex)
+map.on('dblclick', function(evt) {
+  if (!isCreatingTrail || !selectedFeature) return;
+  
+  const geometry = selectedFeature.getGeometry();
+  if (geometry.getType() === 'LineString') {
+    const coords = geometry.getCoordinates();
+    if (coords.length === 1) {
+      // Convert single point LineString to Point
+      const point = new Point(coords[0]);
+      selectedFeature.setGeometry(point);
+      selectedFeature.setStyle(new Style({
+        image: new CircleStyle({
+          radius: 8,
+          fill: new Fill({ color: 'blue' }),
+          stroke: new Stroke({ color: 'white', width: 2 }),
+        }),
+      }));
+      
+      // Exit trail creation mode
+      isCreatingTrail = false;
+      document.body.style.cursor = 'auto';
+      updateVertices();
+      updateTextarea();
+      evt.preventDefault(); // Prevent default double-click zoom
+    }
+  }
+});
+
 // CONTEXT MENU (right click)
 map.getTargetElement().addEventListener('contextmenu', function (evt) {
   evt.preventDefault();
@@ -389,6 +500,68 @@ document.addEventListener('keydown', function(evt) {
   }
 });
 
+// Keyboard shortcut: 'p' to create a point from current trail
+document.addEventListener('keydown', function(evt) {
+  if ((evt.key === 'p' || evt.key === 'P') && isCreatingTrail && selectedFeature) {
+    const geometry = selectedFeature.getGeometry();
+    if (geometry.getType() === 'LineString') {
+      const coords = geometry.getCoordinates();
+      if (coords.length === 1) {
+        // Convert single point LineString to Point
+        const point = new Point(coords[0]);
+        selectedFeature.setGeometry(point);
+        selectedFeature.setStyle(new Style({
+          image: new CircleStyle({
+            radius: 8,
+            fill: new Fill({ color: 'blue' }),
+            stroke: new Stroke({ color: 'white', width: 2 }),
+          }),
+        }));
+        
+        // Exit trail creation mode
+        isCreatingTrail = false;
+        document.body.style.cursor = 'auto';
+        updateVertices();
+        updateTextarea();
+        evt.preventDefault();
+      }
+    }
+  }
+});
+
+// Keyboard shortcut: Enter to finish current trail
+document.addEventListener('keydown', function(evt) {
+  if (evt.key === 'Enter' && isCreatingTrail && selectedFeature) {
+    const geometry = selectedFeature.getGeometry();
+    if (geometry.getType() === 'LineString') {
+      const coords = geometry.getCoordinates();
+      if (coords.length === 1) {
+        // Convert to point
+        const point = new Point(coords[0]);
+        selectedFeature.setGeometry(point);
+        selectedFeature.setStyle(new Style({
+          image: new CircleStyle({
+            radius: 8,
+            fill: new Fill({ color: 'blue' }),
+            stroke: new Stroke({ color: 'white', width: 2 }),
+          }),
+        }));
+      } else if (coords.length === 2) {
+        // Keep as LineString but finish editing
+        selectedFeature.setStyle(defaultStyle);
+      }
+      // For 3+ points, keep as LineString
+      
+      // Exit trail creation mode
+      isCreatingTrail = false;
+      document.body.style.cursor = 'auto';
+      updateVertices();
+      updateTextarea();
+      evt.preventDefault();
+    }
+  }
+});
+
 // Keyboard shortcut: Backspace to delete the currently selected global vertex
 document.addEventListener('keydown', function(evt) {
   if (evt.key === 'Backspace') {
@@ -401,19 +574,44 @@ document.addEventListener('keydown', function(evt) {
 
     const feat = entry.feature;
     const geom = feat && feat.getGeometry ? feat.getGeometry() : null;
-    if (!geom || geom.getType() !== 'LineString') return;
+    if (!geom) return;
 
-    // Work on a copied coords array to avoid shared-reference mutation
-    const coords = geom.getCoordinates().slice();
+    const geomType = geom.getType();
+    
+    if (geomType === 'Point') {
+      // For points, delete the entire feature
+      vectorSource.removeFeature(feat);
+      const ti = trailFeatures.indexOf(feat);
+      if (ti !== -1) trailFeatures.splice(ti, 1);
+      if (selectedFeature === feat) selectedFeature = null;
+
+      // Refresh UI and selections
+      updateVertices();
+      globalSelectedIndex = -1;
+      selectedVertexIndex = -1;
+      updateTextarea();
+      return;
+    }
+
+    let coords = [];
+    let isPolygon = false;
+    
+    if (geomType === 'LineString') {
+      coords = geom.getCoordinates().slice();
+    } else if (geomType === 'Polygon') {
+      coords = geom.getCoordinates()[0].slice(); // Get outer ring
+      isPolygon = true;
+    } else {
+      return;
+    }
+    
     const delIdx = entry.index;
 
     // Remove the selected vertex
     coords.splice(delIdx, 1);
 
-    // If the feature is left with 0 coordinates, remove the entire feature.
-    // If it has 1 coordinate remaining, preserve that single point until the user
-    // explicitly deletes it with another Backspace press.
-    if (coords.length === 0) {
+    // If the feature is left with less than 3 coordinates for polygon or 0 for linestring, remove the entire feature.
+    if ((isPolygon && coords.length < 3) || (!isPolygon && coords.length === 0)) {
       // Remove from source and editable lists
       vectorSource.removeFeature(feat);
       const ti = trailFeatures.indexOf(feat);
@@ -428,8 +626,12 @@ document.addEventListener('keydown', function(evt) {
       return;
     }
 
-    // Otherwise update the geometry with the removed vertex (including the single-point case)
-    geom.setCoordinates(coords);
+    // Otherwise update the geometry with the removed vertex
+    if (isPolygon) {
+      geom.setCoordinates([coords]);
+    } else {
+      geom.setCoordinates(coords);
+    }
 
     // Adjust branchStart metadata if present
     const bs = feat.get('branchStart');
@@ -476,6 +678,14 @@ contextMenuTrail.addEventListener('click', function (evt) {
   const action = evt.target.getAttribute('data-action');
   if (action !== 'trail-mode') return;
 
+  // Clear any existing selection state to ensure we start fresh
+  selectedFeature = null;
+  globalSelectedIndex = -1;
+  selectedVertexIndex = -1;
+  trailFeatures.length = 0;
+  isBranching = false;
+  branchParent = null;
+
   isCreatingTrail = true;
   document.body.style.cursor = 'crosshair';
 
@@ -513,10 +723,18 @@ contextMenu.addEventListener('click', function (evt) {
 
   switch (action) {
     case 'Create trail': {
-      if (selectedFeature.getGeometry().getType() === 'LineString') {
+      const geomType = selectedFeature.getGeometry().getType();
+      if (geomType === 'LineString' || geomType === 'Polygon' || geomType === 'Point') {
         // Enter trail-editing mode for the selected feature and show its vertices
         isCreatingTrail = true;
-        originalCoords = [...selectedFeature.getGeometry().getCoordinates()];
+        
+        if (geomType === 'LineString') {
+          originalCoords = [...selectedFeature.getGeometry().getCoordinates()];
+        } else if (geomType === 'Polygon') {
+          originalCoords = [...selectedFeature.getGeometry().getCoordinates()[0]];
+        } else if (geomType === 'Point') {
+          originalCoords = [selectedFeature.getGeometry().getCoordinates()];
+        }
 
         // Make the selected feature the only editable trail so updateVertices will render only its vertices
         trailFeatures.length = 0;
@@ -530,8 +748,24 @@ contextMenu.addEventListener('click', function (evt) {
     }
     case 'Replace trail':
       if (isCreatingTrail) {
-        // Create a new feature with the current state of the LineString
-        const currentCoords = selectedFeature.getGeometry().getCoordinates();
+        // Check if this is a single-point LineString and convert to Point
+        const geometry = selectedFeature.getGeometry();
+        if (geometry.getType() === 'LineString') {
+          const coords = geometry.getCoordinates();
+          if (coords.length === 1) {
+            // Convert single point LineString to Point
+            const point = new Point(coords[0]);
+            selectedFeature.setGeometry(point);
+            selectedFeature.setStyle(new Style({
+              image: new CircleStyle({
+                radius: 8,
+                fill: new Fill({ color: 'blue' }),
+                stroke: new Stroke({ color: 'white', width: 2 }),
+              }),
+            }));
+          }
+        }
+
         const originalCoords = selectedFeature.get('originalCoords');
         
         // Finalize trail editing without splitting: keep the extended segments as part of the same LineString.
